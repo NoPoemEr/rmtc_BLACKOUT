@@ -1,0 +1,20 @@
+# colcon 构建产物（可随时重跑 colcon build 生成）
+contestant_ws/build/
+contestant_ws/install/
+contestant_ws/log/
+# 防误在仓库根目录跑 colcon（10/21 踩过：根级 build/install/log 差点入库）
+/build/
+/install/
+/log/
+
+# 运行时与编辑器杂项
+*.log
+*.pyc
+__pycache__/
+.DS_Store
+
+# 提交打包产物（tools/package.sh 输出）
+dist/
+
+# 设计与验证文档、检录证据不随代码仓库提交（技术报告另交语雀）
+/docs/
