@@ -7,9 +7,6 @@ contestant_ws/log/
 /install/
 /log/
 
-# 赛场命令本地副本（含真实令牌，禁止提交）
-*.local.txt
-
 # 运行时与编辑器杂项
 *.log
 *.pyc
