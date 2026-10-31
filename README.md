@@ -11,7 +11,7 @@ ROS 2 Humble 单节点程序：订阅本席位 `/team_X/perception`，每 Tick �
 ```text
 rmtc_blackout/
 ├── README.md                    # 本文：环境、构建、启动、阶段切换、模块说明
-├── run_contestant.sh            # 唯一启动入口：席位/队名/网关参数化，导出运行环境
+├── run_contestant.sh            # tools/ 批量验收脚本内部复用；比赛启动不使用（见下）
 ├── contestant_ws/               # colcon 工作空间
 │   └── src/rmtc_bot/            # 参赛包（自包含，可直接构建）
 │       ├── CMakeLists.txt
@@ -44,57 +44,58 @@ source /opt/ros/humble/setup.bash
 cd contestant_ws
 colcon build
 cd ..
+source contestant_ws/install/setup.bash
 ```
 
-构建完成后，`contestant_ws/install/setup.bash` 由 `run_contestant.sh` 自动 source，不需要手工 source。
+构建完成后必须手工 `source contestant_ws/install/setup.bash`；每开一个新终端，都要重新 source ROS 和本工作空间（或把这两行写进该终端的启动配置）。
 
-## 启动（完整命令）
+## 启动（纯命令行）
 
-第一阶段（A 席位，采集档）：
+以下命令不经过 `run_contestant.sh`，直接从仓库根目录用 `ros2 run` 启动。第一阶段（A 席位，采集档）完整命令：
 
 ```bash
 cd /path/to/rmtc_blackout
-./run_contestant.sh A 'BLACKOUT队' http://<AI网关地址>:<端口>/v1/chat/completions
+source /opt/ros/humble/setup.bash
+source contestant_ws/install/setup.bash
+
+export ROS_DOMAIN_ID=27
+export ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export RMTC_TEAM_TOKEN='<本场令牌>'
+export RMTC_LLM_URL='http://<AI网关地址>:<端口>/v1/chat/completions'
+export RMTC_DECISION_CONFIG="$PWD/contestant_ws/src/rmtc_bot/config/decision_config.json"
+
+ros2 run rmtc_bot rmtc_bot A 'BLACKOUT队'
 ```
 
-第二阶段（裁判分配的席位，对抗档；示例为 B 席位）：
+第二阶段（裁判分配的席位，对抗档；示例为 B 席位）：把 `decision_type` 改为 `combat`、席位改为裁判分配的 B，其余环境变量不变，重新执行最后一条命令：
 
 ```bash
-cd /path/to/rmtc_blackout
-./run_contestant.sh B 'BLACKOUT队' http://<AI网关地址>:<端口>/v1/chat/completions
+ros2 run rmtc_bot rmtc_bot B 'BLACKOUT队'
 ```
 
-席位是参赛身份，决定注册的 ROS 话题与动作归属。脚本**不接受默认席位**：第 1 参数或 `RMTC_SEAT` 缺失、或不是 A–D 大写单字符时直接报错退出，避免注册错席位。
+席位是参赛身份，直接作为 `ros2 run` 后的第 1 个参数传入，决定注册的 ROS 话题与动作归属；缺失或不是 A–D 大写单字符时，节点会直接报错退出，避免注册错席位。`RMTC_DECISION_CONFIG` 必须使用上面这样的**绝对路径**（或从仓库根目录传入源码路径）；否则当前目录不对时，配置会回退到 `wait`。
 
 ## 接入参数
 
-全部接入参数通过环境变量覆盖，不硬编码正式配置：
+全部接入参数通过环境变量传入，不硬编码正式配置：
 
-| 变量 | 默认值 | 说明 |
+| 变量 | 示例值 / 代码默认 | 说明 |
 |---|---|---|
-| `RMTC_SEAT` | 无（必填） | 席位 A–D 大写；与第 1 个位置参数等效 |
-| `ROS_DOMAIN_ID` | 27 | 正式赛按主办方公布值设置 |
-| `ROS_LOCALHOST_ONLY` | 0 | 0 = 允许跨机通信 |
-| `RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | 与裁判端保持一致 |
-| `RMTC_TEAM_TOKEN` | `practice-A` | 本场队伍令牌；正式赛必须换成现场令牌 |
-| `RMTC_LLM_URL`（别名 `RMTC_AI_GATEWAY`） | 启动脚本第 3 参数 | AI 网关完整 URL |
+| `ROS_DOMAIN_ID` | 示例 27 | 正式赛按主办方公布值设置 |
+| `ROS_LOCALHOST_ONLY` | 示例 0 | 0 = 允许跨机通信 |
+| `RMW_IMPLEMENTATION` | 示例 `rmw_fastrtps_cpp` | 与裁判端保持一致 |
+| `RMTC_TEAM_TOKEN` | 无默认，必须设置 | 本场队伍令牌；未设置时 LLM 客户端禁用，第二阶段会丢 AI 资格 |
+| `RMTC_LLM_URL` | 无默认，必须设置 | AI 网关完整 URL；未设置时 LLM 客户端禁用 |
 | `RMTC_LLM_MODEL` | `deepseek-flash` | 请求模型名；设为空字符串表示不发送 `model` 字段 |
 | `RMTC_LLM_THINKING` | `disabled` | `disabled`/`enabled` 发送 thinking 字段；`off`/`none`/空 = 不发送 |
 | `RMTC_LLM_MAX_TOKENS` / `RMTC_LLM_TIMEOUT_MS` | 512 / 6000 | LLM 输出上限 / 连接读超时（毫秒） |
 | `RMTC_LLM_TEMPERATURE` / `RMTC_LLM_RESPONSE_FORMAT` | 0.2 / `json_object` | 结论 JSON 稳定性；`none` 关闭 response_format |
-| `RMTC_DECISION_CONFIG` | 包内 `config/decision_config.json` | 决策档位配置文件路径 |
-
-示例（全部走环境变量）：
-
-```bash
-export ROS_DOMAIN_ID=27
-export RMTC_SEAT=A
-export RMTC_TEAM_TOKEN='<本场令牌>'
-export RMTC_LLM_URL='http://<AI网关地址>:<端口>/v1/chat/completions'
-./run_contestant.sh A 'BLACKOUT队' "$RMTC_LLM_URL"
-```
+| `RMTC_DECISION_CONFIG` | 代码默认相对 `config/decision_config.json`；纯命令行必须显式设绝对路径 | 决策档位配置文件；当前目录不对时会回退 `wait` |
 
 > 令牌只通过环境变量传入，禁止写入源码、README、截图或提交包。材料中不得包含模型密钥或正式令牌。
+
+> `run_contestant.sh` 仅保留给 `tools/` 下的批量验收脚本复用，不作为比赛启动方式；比赛启动以上面的 `ros2 run` 命令为准。
 
 ## 第一 / 第二阶段如何切换
 
@@ -116,9 +117,9 @@ export RMTC_LLM_URL='http://<AI网关地址>:<端口>/v1/chat/completions'
 
 1. 停止当前程序（Ctrl-C）。
 2. 只修改 `decision_config.json` 的 `decision_type` 值，例如 `collect` → `combat`；不要改其他字段。
-3. 从仓库根目录重新执行 `./run_contestant.sh <席位> 'BLACKOUT队' <网关地址>`。
+3. 从仓库根目录重新执行 `ros2 run rmtc_bot rmtc_bot <席位> 'BLACKOUT队'`；启动前确认 `RMTC_DECISION_CONFIG` 仍指向源码树中的该文件。
 
-`run_contestant.sh` 会把 `RMTC_DECISION_CONFIG` 指向**源码树**中的该文件，因此切换档位**不需要重新 `colcon build`**；程序启动时读取一次，修改后必须重启进程才生效。若重新构建，`install/share/rmtc_bot/config/` 下的副本会同步，但运行时仍以源码树文件为准。
+`RMTC_DECISION_CONFIG` 必须指向**源码树**中的该文件（见上文完整命令），因此切换档位**不需要重新 `colcon build`**；程序启动时读取一次，修改后必须重启进程才生效。若重新构建，`install/share/rmtc_bot/config/` 下的副本会同步，但运行时仍以 `RMTC_DECISION_CONFIG` 指定的文件为准。
 
 比赛期间只允许改这一个字段，禁止现场修改源代码、算法实现、Prompt、其他决策参数或人工发送具体动作。每场最多 2 次人工策略切换。
 
@@ -196,5 +197,5 @@ ros2 run rmtc_bot decision_selftest
 
 - 代码仓库：<https://github.com/NoPoemEr/rmtc_BLACKOUT>（工作人员可直接访问）
 - 技术报告：语雀协作文档（含设计思路、功能完成情况、分工、日程、问题解决、AI 协同、测试截图与运行指令），按通知提交链接并将群主/学辅设为协作者。
-- 代码出包：`./tools/package.sh`；当前提交版本以 `git log -1` 为准，比赛启动路径固定为 `<仓库根>/run_contestant.sh`。
+- 代码出包：`./tools/package.sh`；当前提交版本以 `git log -1` 为准。比赛启动目录固定为 `<仓库根>`，启动命令为 `ros2 run rmtc_bot rmtc_bot <席位> 'BLACKOUT队'`，接入参数按上表通过 `export` 注入。
 - 前置检录截图/录屏放在技术报告中；仓库与提交包不包含模型密钥、正式令牌或裁判管理数据。
