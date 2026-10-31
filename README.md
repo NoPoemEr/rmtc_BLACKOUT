@@ -51,7 +51,7 @@ source contestant_ws/install/setup.bash
 
 ## 启动（纯命令行）
 
-以下命令不经过 `run_contestant.sh`，直接从仓库根目录用 `ros2 run` 启动。第一阶段（A 席位，采集档）完整命令：
+以下命令不经过 `run_contestant.sh`，直接从仓库根目录用 `ros2 run` 启动。现场也可照着仓库根目录的 `赛场命令.txt` 复制执行；该文件只含占位符，真实令牌请填 `*.local.txt` 本地副本（已忽略，不会提交）。第一阶段（A 席位，采集档）完整命令：
 
 ```bash
 cd /path/to/rmtc_blackout

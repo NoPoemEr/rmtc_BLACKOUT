@@ -1,0 +1,104 @@
+======================================================================
+BLACKOUT 队 · RMTC 赛场命令执行单（纯命令行）
+======================================================================
+说明：
+- 本文件只放模板，不写真实令牌。现场复制为 赛场命令.local.txt 再填；
+  该文件名已加入 .gitignore，不会被提交。
+- 只允许改 decision_config.json 的 decision_type；不要改源码。
+- 每开一个新终端，先执行【1】，再执行【2】的 export。
+
+【0. 现场向裁判确认】
+席位（A/B/C/D）        = ____
+ROS_DOMAIN_ID          = ____   # 0–232 的整数，不是本机 IPv4
+本机有线 IPv4/掩码      = ____/____
+裁判机 IP               = ____
+AI 网关 IP / 端口       = ____ / ____
+AI 完整 URL             = http://____:____/v1/chat/completions
+本场令牌                = ____   # 只填本地副本，不写进本文件
+队名                    = BLACKOUT队
+阶段                    = 第一阶段 collect / 第二阶段 combat
+
+【1. 进仓库 + 加载 ROS（每个新终端）】
+cd /home/nopoemer/rmtc_blackout
+source /opt/ros/humble/setup.bash
+source contestant_ws/install/setup.bash
+ros2 pkg prefix rmtc_bot
+# 应输出 .../rmtc_blackout/contestant_ws/install/rmtc_bot
+
+【2. 填本场参数（当前终端执行一次；换终端重做）】
+# ↓↓↓ 现场只改这 5 行；等号右边换成裁判给的真实值 ↓↓↓
+export SEAT='A'                 # 第一阶段 A；第二阶段改成裁判分配席位
+export ROS_DOMAIN_ID='27'       # 裁判公布值，不是本机 IPv4
+export REF_IP=''                # 裁判机 IP，仅用于第 3 节网络检查
+export RMTC_TEAM_TOKEN=''       # 本场令牌；空 = LLM 禁用
+export RMTC_LLM_URL=''          # http://网关IP:端口/v1/chat/completions
+# ↑↑↑ 改完继续 ↑↑↑
+
+export ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export RMTC_DECISION_CONFIG="$PWD/contestant_ws/src/rmtc_bot/config/decision_config.json"
+
+# 检查（不打印令牌内容）
+echo "SEAT=$SEAT DOMAIN=$ROS_DOMAIN_ID REF_IP=$REF_IP"
+echo "TOKEN_SET=$([ -n "$RMTC_TEAM_TOKEN" ] && echo yes || echo no) URL=$RMTC_LLM_URL"
+
+# 不想让令牌进 shell 历史时，可改用：
+# read -rsp '本场令牌: ' RMTC_TEAM_TOKEN; export RMTC_TEAM_TOKEN; echo
+
+【3. 有线网络检查（不是 ROS 命令）】
+# 先把上面的 REF_IP 填成裁判机 IP，否则下面两条会报错
+ip -4 addr show
+ip route get "$REF_IP"
+ping -c 3 "$REF_IP"
+# 确认 inet 是裁判发给本队的有线 IPv4，路由 dev 是有线网卡
+# 本机 IPv4 只在这里核对，不写进 ros2 run / ROS_DOMAIN_ID
+# ping 不通不一定 HTTP 不通，最终以程序能否收到感知为准
+# 同时连着 WiFi 时，赛前关掉 WiFi，避免 DDS 选错网卡
+
+【4. 第一阶段：A 席位 + collect】
+cat "$RMTC_DECISION_CONFIG"
+# 必须显示 {"decision_type": "collect"}
+ros2 run rmtc_bot rmtc_bot A 'BLACKOUT队'
+# 启动日志应含：策略=collect LLM=off(本档不启用)
+
+【5. 第二阶段：裁判分配席位 + combat】
+# Ctrl-C 停掉当前进程；只改 decision_type：
+nano "$RMTC_DECISION_CONFIG"
+# 内容改成 {"decision_type": "combat"}，保存退出
+cat "$RMTC_DECISION_CONFIG"
+
+export SEAT='B'                 # ← 改成裁判分配给你的席位（A/B/C/D）
+ros2 run rmtc_bot rmtc_bot "$SEAT" 'BLACKOUT队'
+# 启动日志应含：策略=combat LLM=已启用
+# 若显示 LLM=未配置(仅本地策略)：令牌或 URL 没填好，先别开赛
+
+【6. 联调排障：wait（只在裁判允许时）】
+# decision_type 改成 wait，重启；每 Tick 发合法 WAIT，用来验证感知链路
+# 正式对局不要用 wait
+
+【7. 开赛后检查（另开终端；先做【1】并重跑【2】的 export）】
+ros2 topic list | grep "team_${SEAT}"
+# 应看到 /team_X/perception、/team_X/action、/team_X/registration
+timeout 5 ros2 topic echo "/team_${SEAT}/perception" --once
+# 看到 tick/session_id/self 即链路通；没看到就是域/网卡/席位不对
+
+【8. 重新构建（只有源码改动/换机才做；比赛期间不要改源码）】
+# 先 Ctrl-C 停掉正在跑的节点
+cd /home/nopoemer/rmtc_blackout/contestant_ws
+colcon build --packages-select rmtc_bot
+cd ..
+source contestant_ws/install/setup.bash
+
+【9. 快速排错】
+- 启动日志 策略=wait：RMTC_DECISION_CONFIG 路径不对，或文件不是 collect/combat
+- 收不到 /team_X/perception：domain 错 / ROS_LOCALHOST_ONLY=1 / 网卡或交换机不通
+- LLM=未配置：令牌或 URL 为空；URL 要完整到 /v1/chat/completions
+- LLM=已启用但调用 401：令牌不是本场的/已过期
+- 席位合法但收不到数据：席位填错（裁判给 B，你跑了 A）
+- ros2 run 找不到包：忘了 source contestant_ws/install/setup.bash，或构建没成功
+- 同一席位不要开两个终端同时跑，动作会重复
+
+【10. 红线】
+- 不把本场令牌写进本文件、README、截图或提交包；只填本地副本。
+- 不现场改源码、Prompt、其他决策参数；每场最多 2 次策略切换。
+- 不订阅其他席位，不读观赛画面/裁判内部数据。
