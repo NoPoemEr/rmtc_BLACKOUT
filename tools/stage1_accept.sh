@@ -24,6 +24,7 @@ fi
 BASE="http://127.0.0.1:$PORT"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 EVI="$ROOT/docs/evidence"
+mkdir -p "$EVI"
 MIN_SCORE=35      # 通过线（runbook §3）
 TARGET_SCORE=38   # 冲刺线
 MAX_TICKS=100     # stage1 默认 100 Tick

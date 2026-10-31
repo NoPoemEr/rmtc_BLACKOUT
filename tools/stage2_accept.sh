@@ -26,6 +26,7 @@ fi
 BASE="http://127.0.0.1:$PORT"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 EVI="$ROOT/docs/evidence"
+mkdir -p "$EVI"
 
 # ---------- 0. 前置检查 ----------
 echo "==> [0/5] 前置检查"

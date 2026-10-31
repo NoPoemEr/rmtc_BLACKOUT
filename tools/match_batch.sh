@@ -23,6 +23,7 @@ PORT="${5:-8080}"
 BASE="http://127.0.0.1:$PORT"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 EVI="$ROOT/docs/evidence"
+mkdir -p "$EVI"
 
 if [ "$SEAT" != "A" ]; then
   echo "    [中止] 练习场参赛席位固定为 A（B/C/D 是陪练车位），当前='$SEAT'" >&2

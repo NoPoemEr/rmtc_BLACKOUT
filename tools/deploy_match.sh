@@ -25,6 +25,7 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$HERE/.."
 CFG="$ROOT/contestant_ws/src/rmtc_bot/config/decision_config.json"
 EVI="$ROOT/docs/evidence"
+mkdir -p "$EVI"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
 MODE=check

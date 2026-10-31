@@ -18,6 +18,7 @@ TAG="${2:?用法: map_test.sh <config.json> <标签>}"
 PORT="${3:-8080}"
 BASE="http://127.0.0.1:$PORT"
 EVI="$ROOT/docs/evidence"
+mkdir -p "$EVI"
 REF_DIR="$HOME/Desktop/dist/rmtc_practice"
 
 stop_referee() {
