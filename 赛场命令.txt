@@ -53,7 +53,7 @@ ping -c 3 "$REF_IP"
 # 确认 inet 是裁判发给本队的有线 IPv4，路由 dev 是有线网卡
 # 本机 IPv4 只在这里核对，不写进 ros2 run / ROS_DOMAIN_ID
 # ping 不通不一定 HTTP 不通，最终以程序能否收到感知为准
-# 同时连着 WiFi 时，赛前关掉 WiFi，避免 DDS 选错网卡
+# 同时连着 WiFi/VPN 时，赛前关掉 WiFi 和 VPN，避免 DDS 选错网卡
 
 【4. 第一阶段：A 席位 + collect】
 cat "$RMTC_DECISION_CONFIG"
