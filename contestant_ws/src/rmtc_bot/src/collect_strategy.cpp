@@ -95,7 +95,9 @@ Route BfsRoute(int sx, int sy, int tx, int ty, int w, int h,
 // 敏感性表见同脚本与 docs/analysis/stage1_exploration_20261031.md §3.2）。
 Route ExploreRoute(int sx, int sy, int w, int h, int radius,
                    const std::set<Cell> &seen,
-                   const std::set<Cell> &obstacles, int distance_weight = 1) {
+                   const std::set<Cell> &obstacles, int distance_weight = 1,
+                   int center_x = -1, int center_y = -1,
+                   int center_weight = 0) {
   if (w <= 0 || h <= 0 || sx < 0 || sy < 0 || sx >= w || sy >= h) {
     return {-1, ""};
   }
@@ -143,8 +145,20 @@ Route ExploreRoute(int sx, int sy, int w, int h, int radius,
       if (gain == 0) continue;
       // 距离惩罚系数默认 1（整数运算，无浮点误差）；高价值搜索模式用更大
       // 系数（见调用点），优先扫完当前走廊/近处前沿，不急着横穿全图。
+      // V8.8 开局冲中心：高价值搜索时给"更靠近地图中心"的落点加权，
+      // 让无资源可追时也朝中心高价值区推进，而不是在出生侧磨蹭。
       // 坐标升序保证 tie-break 确定。
-      const int score = gain - distance_weight * d;
+      int center_bonus = 0;
+      if (center_weight > 0 && center_x >= 0 && center_y >= 0) {
+        const int cur_center =
+            std::abs(sx - center_x) + std::abs(sy - center_y);
+        const int cell_center =
+            std::abs(x - center_x) + std::abs(y - center_y);
+        if (cell_center < cur_center) {
+          center_bonus = center_weight * (cur_center - cell_center);
+        }
+      }
+      const int score = gain - distance_weight * d + center_bonus;
       if (score > best_score ||
           (score == best_score &&
            (d < best_dist || (d == best_dist && c < best)))) {
@@ -349,6 +363,14 @@ ActionChoice CollectStrategy::decide(const Perception &p, const LlmResult *llm) 
           : 0.0;
   const bool high_search =
       high_task_pending && !any_high_known && known_cov < 0.75;
+  // V8.8 开局冲中心（10/31 现场反馈）：后期人人对抗分满，资源是决胜项。
+  // 高价值任务未完成且还没看到高价值资源时，普通资源按"是否更靠近中心"
+  // 加权——沿着普通资源线往中心高价值区推，而不是被出生点附近的小资源
+  // 反复截胡。只在高价值搜索窗口内生效；一旦看到高价值资源即恢复原优先级。
+  const int center_x = (w - 1) / 2;
+  const int center_y = (h - 1) / 2;
+  const int our_center_dist =
+      std::abs(x - center_x) + std::abs(y - center_y);
 
   const auto enemy_contests = [&](int rx, int ry, int our_d) {
     for (const auto &e : p.entities) {
@@ -373,7 +395,12 @@ ActionChoice CollectStrategy::decide(const Perception &p, const LlmResult *llm) 
       if (dynamic_blockers_ && enemy_contests(kv.second.x, kv.second.y, rt.dist))
         continue;  // 阶段二：对手更近，不送空趟
       const bool high_value = kv.second.value >= 20;
-      if (high_search && !high_value && rt.dist > 8) continue;  // 先探高价值
+      // V8.8：远处普通资源只要在"往中心走"的方向上就允许顺路拿；背向中心的
+      // 远处普通资源仍然跳过，避免把开局窗口浪费在出生侧。
+      const int res_center_dist =
+          std::abs(kv.second.x - center_x) + std::abs(kv.second.y - center_y);
+      const int center_gain = our_center_dist - res_center_dist;
+      if (high_search && !high_value && rt.dist > 8 && center_gain <= 0) continue;
       int bonus = 0;
       // 高价值任务未完成：高价值资源最多可比普通资源多绕 10 步（报告建议
       // 8–12 步）；普通任务未完成：普通资源最多多绕 8 步。两个任务都在时
@@ -381,9 +408,13 @@ ActionChoice CollectStrategy::decide(const Perception &p, const LlmResult *llm) 
       if (high_task_pending && high_value) bonus += 10;
       if (normal_task_pending && !high_value) bonus += 8;
       if (value_task_pending) bonus += high_value ? 4 : 0;
+      // V8.8：每靠近中心 1 格，等效抵扣 2 步绕行；普通资源因此会沿中心
+      // 方向排队，但不会为了中心放弃脚下的资源。
+      const int center_bonus =
+          (high_search && center_gain > 0) ? 2 * center_gain : 0;
       // 折扣后距离小者优先；同 rank 取实际路径短者，再取价值高者，最后 id
       // （res_ 是 std::map，id 有序，保证 tie-break 确定）。
-      const int rank = rt.dist - bonus;
+      const int rank = rt.dist - bonus - center_bonus;
       if (rank < best_rank ||
           (rank == best_rank &&
            (rt.dist < best_dist ||
@@ -407,6 +438,7 @@ ActionChoice CollectStrategy::decide(const Perception &p, const LlmResult *llm) 
     const bool high_value = res_[target_].value >= 20;
     if (high_task_pending && high_value) return "（高价值任务优先）";
     if (normal_task_pending && !high_value) return "（普通资源任务优先）";
+    if (high_search) return "（向中心搜索高价值）";
     return "";
   };
 
@@ -418,13 +450,16 @@ ActionChoice CollectStrategy::decide(const Perception &p, const LlmResult *llm) 
     if (!explore_enabled_) return emit(ActionChoice::Wait(why));
     // 高价值任务未完成且没有高价值记忆：近处优先（λ=6），先扫当前走廊，
     // 避免为了远处大块未见图一路横穿、把近处资源让给对手（长廊局实测）。
+    // V8.8：同时给"更靠中心"的已见落点加权，无资源可追时也向中心推进。
     Route ex = ExploreRoute(x, y, w, h, vr, seen_, obstacles_,
-                            high_search ? 6 : 1);
+                            high_search ? 6 : 1, center_x, center_y,
+                            high_search ? 2 : 0);
     if (ex.dist < 0) {
       return emit(ActionChoice::Wait(std::string(why) + "，且已无可探索区域"));
     }
     return emit(ActionChoice::Move(
-        ex.first, std::string(why) + "，探索未见图（已见 " +
+        ex.first, std::string(why) + "，探索未见图" +
+                      (high_search ? "（向中心搜索高价值）" : "") + "（已见 " +
                       std::to_string(seen_.size()) + " 格，目标距 " +
                       std::to_string(ex.dist) + "）"));
   };

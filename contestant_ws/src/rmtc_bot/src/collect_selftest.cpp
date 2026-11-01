@@ -1,4 +1,4 @@
-// collect_selftest.cpp —— CollectStrategy 离线自检（29 组场景，不依赖 ROS/裁判）
+// collect_selftest.cpp —— CollectStrategy 离线自检（30 组场景，不依赖 ROS/裁判）
 //
 // 第 13 组是 10/21 线上 stage1 实测抓出的真实 bug 回归用例（得分上涨误删视野外记忆）。
 // 第 14–16 组是 10/27 静态审查 L18/L20/L21 修复的回归用例。
@@ -543,10 +543,26 @@ void Test29_HighSearchStillTakesNearNormal() {
   CHECK_C(c.reason.find("near_normal") != std::string::npos, c);
 }
 
+// V8.8 开局冲中心：高价值未找到时，普通资源要沿"更靠近中心"的方向选，
+// 不能被出生点旁边的小资源反复截胡；同时仍然捡普通资源，不是裸冲中心。
+void Test30_HighSearchPrefersTowardCenterNormal() {
+  std::printf("[TEST] 30 高价值搜索 → 普通资源向中心倾斜\n");
+  CollectStrategy s;
+  Perception f =
+      Frame(10, "s", 1, 1, {Res(2, 1, "near_behind", 10),
+                            Res(1, 6, "toward_center", 10)});
+  f.missions.push_back(ResourceTask("collect_high", "high_resources"));
+  ActionChoice c = s.decide(f, nullptr);
+  CHECK_C(c.action == "move", c);
+  CHECK_C(c.direction == "down", c);
+  CHECK_C(c.reason.find("toward_center") != std::string::npos, c);
+  CHECK_C(c.reason.find("中心") != std::string::npos, c);
+}
+
 }  // namespace
 
 int main() {
-  std::printf("==== CollectStrategy 离线自检（29 组场景）====\n");
+  std::printf("==== CollectStrategy 离线自检（30 组场景）====\n");
   Test01_EmptyPerception();
   Test02_NearestStraight();
   Test03_MemoryOutOfSight();
@@ -576,6 +592,7 @@ int main() {
   Test27_NormalTaskPrefersNormalResource();
   Test28_HighSearchExploresInsteadOfFarNormal();
   Test29_HighSearchStillTakesNearNormal();
+  Test30_HighSearchPrefersTowardCenterNormal();
 
   if (g_fail == 0) {
     std::printf("==== 全部通过 ====\n");
